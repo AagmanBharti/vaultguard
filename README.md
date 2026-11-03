@@ -1,72 +1,125 @@
-# VaultGuard — zero-knowledge encrypted password manager
+# 🔐 VaultGuard
 
-Passwords are encrypted in the browser before they are sent anywhere. The backend only stores
-ciphertext and can never read your master password or your saved credentials.
+**A zero-knowledge password manager.** Your passwords are encrypted in your browser before they ever leave it, so the server stores only unreadable ciphertext and can never see your master password or your saved credentials.
 
-## Run
+Built with vanilla JavaScript, the Web Crypto API and Node.js, with **no third-party dependencies**.
 
-```bash
-npm start            # http://127.0.0.1:3000  (Node 20+, no dependencies to install)
-npm test             # unit + end-to-end tests
-```
+<!-- After adding screenshots to a /screenshots folder, remove these comment markers:
+![Sign in](screenshots/login.png)
+![Vault](screenshots/vault.png)
+![Password generator](screenshots/generator.png)
+-->
 
-Env vars: `PORT`, `HOST` (default `127.0.0.1`), `TRUST_PROXY=1` (use `X-Forwarded-For` for IPs behind a proxy).
-Data is stored in `data/db.json`. Web Crypto needs a secure context: `localhost` works, anything else needs HTTPS.
+## Features
 
-## Feature map
-
-| Feature | Where |
-|---|---|
-| User registration | `POST /api/register`, `public/app.js` (`doRegister`) |
-| Master password | Never sent; derives keys locally (`public/crypto.js`) |
-| Client-side encryption | AES-256-GCM, fresh random IV per save (`encryptJson`) |
-| Password generator | `public/generator.js` — `crypto.getRandomValues` + rejection sampling, no `Math.random` |
-| Secure vault | Entire vault is one encrypted blob; server stores `{iv, ct, version}` |
-| Strength checker | `public/strength.js` — entropy estimate, common-password / leetspeak / sequence / repeat penalties; also flags reused passwords |
-| Auto-lock | Inactivity timer (1–30 min, default 5); drops key + decrypted data and ends the session |
-| Breach check | `public/breach.js` — HIBP range API, k-anonymity (only a 5-char SHA-1 prefix leaves the browser) |
-| Audit log | Server records register / login / failed login / save / lock / auto-lock / breach-check, with time + IP; viewable in the UI |
+- **Client-side encryption:** AES-256-GCM with a fresh random IV on every save. Tampered or wrong-key data fails to decrypt.
+- **Master password that never leaves your browser:** keys are derived locally with PBKDF2-SHA256 (600,000 iterations) and split with HKDF.
+- **Secure password generator:** uses `crypto.getRandomValues` with unbiased sampling, never `Math.random`. Configurable length (8–64), character sets and look-alike avoidance.
+- **Password strength checker:** entropy estimate with penalties for common passwords, leetspeak variants, repeats and sequences. Reused passwords are flagged too.
+- **Breached-password check:** queries the Have I Been Pwned range API using k-anonymity, so only the first 5 characters of a SHA-1 hash leave the browser.
+- **Auto-lock:** locks after 1–30 minutes of inactivity (default 5), wiping the key and decrypted data and ending the session.
+- **Audit log:** records account creation, sign-ins, failed sign-ins, vault saves, locks, auto-locks and breach checks with time and IP.
+- **Vault tools:** add, edit, delete and search entries, reveal passwords, and copy to the clipboard, which clears after 20 seconds.
 
 ## How the zero-knowledge design works
 
 ```
 master password + email
-   │ PBKDF2-SHA256, 600,000 iterations
+   │  PBKDF2-SHA256, 600,000 iterations
    ▼
-master key ── HKDF "vaultguard-auth" ──► authKey  → sent to server (login proof only)
-          └── HKDF "vaultguard-enc"  ──► AES key  → stays in browser, non-extractable
+master key ── HKDF "vaultguard-auth" ──► authKey  → sent to the server (login proof only)
+          └── HKDF "vaultguard-enc"  ──► AES key  → stays in the browser, non-extractable
 ```
 
-- The server stores `scrypt(authKey, per-user salt)`, so even its database can't be replayed to log in.
-- The authKey and encryption key are independent (domain-separated HKDF), so the server learns nothing that helps it decrypt.
-- AES-GCM authenticates the data: a tampered or wrong-key ciphertext fails to decrypt.
-- A test (`test/vaultguard.test.js`) asserts the master password, site passwords, site names and authKey never appear in the stored database.
+1. You register or sign in. Your master password is turned into a master key **in the browser**.
+2. Two independent keys are derived from it. The **auth key** proves who you are. The **encryption key** encrypts your vault and is never sent anywhere.
+3. The entire vault is encrypted as one blob. The server stores `{ iv, ciphertext, version }`.
+4. The server stores only `scrypt(authKey, per-user salt)`, so even a stolen database can't be replayed to log in or used to decrypt vaults.
 
-## Other protections
+An automated end-to-end test asserts that the master password, site passwords, site names and auth key **never appear** in the stored database.
 
-- Login throttling (5 failures/email, 20/IP per 15 min), constant-work login to avoid account-existence timing leaks.
-- Sessions are random 256-bit bearer tokens (hash stored server-side), 30-min sliding expiry, kept only in memory in the browser.
-- Optimistic concurrency on vault saves (409 if changed on another device) so edits aren't silently overwritten.
-- Strict CSP (no inline script/style), `nosniff`, `no-referrer`, frame denial, HSTS; UI is built with text nodes only (no `innerHTML`).
-- Clipboard is cleared 20 s after copying.
+## Getting started
 
-## Known limitations (be honest about these)
+**Requirements:** [Node.js](https://nodejs.org) 20 or newer. There is nothing else to install.
 
-- **No master-password recovery or change flow.** Forgetting it means the vault is unrecoverable (by design). Changing it requires re-encrypting and re-registering the verifier; not implemented.
-- JavaScript can't reliably wipe memory; "locking" drops references but the GC decides when bytes disappear.
-- The web app is trusted code delivered by the server: a compromised server could ship malicious JS. A browser extension or native client with signed code narrows this.
-- The "already exists" response on registration reveals which emails have accounts.
-- The weak-password list is small and bundled; the breach check is the stronger signal.
-- Single JSON file storage and a single process: fine for personal use, swap in a real database for production.
-- Run behind HTTPS in any real deployment.
+```bash
+git clone https://github.com/AagmanBharti/VaultGuard.git
+cd VaultGuard
+npm start
+```
+
+Open **http://localhost:3000**, click **Create account**, and choose a long master password (12+ characters).
+
+Run the tests:
+
+```bash
+npm test
+```
+
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `3000` | Port to listen on |
+| `HOST` | `127.0.0.1` | Use `0.0.0.0` when deploying |
+| `TRUST_PROXY` | off | Set to `1` behind a reverse proxy so the real client IP is logged |
+
+Data is stored in `data/db.json`. The Web Crypto API requires a secure context: `localhost` works, and anything else needs HTTPS.
+
+## Security measures
+
+- Login rate limiting (5 failures per email and 20 per IP in 15 minutes), with constant-work logins so timing doesn't reveal which accounts exist
+- Random 256-bit session tokens (only a hash is stored on the server) with a 30-minute sliding expiry, held in memory only in the browser
+- Optimistic concurrency on vault saves, so a stale write returns HTTP 409 instead of overwriting newer data
+- Strict Content Security Policy with no inline scripts or styles, plus `nosniff`, `no-referrer`, frame denial and HSTS
+- The UI is built from text nodes only (no `innerHTML`), which prevents XSS from stored data
+
+## Project structure
+
+```
+server.js            Node HTTP server: auth, encrypted vault storage, audit log, static files
+public/
+  index.html         App shell
+  app.js             UI, session handling, auto-lock
+  crypto.js          Key derivation and AES-GCM encryption (Web Crypto)
+  generator.js       Cryptographically secure password generator
+  strength.js        Password strength checker
+  breach.js          Have I Been Pwned k-anonymity lookup
+  style.css          Styles (dark and light themes)
+test/
+  vaultguard.test.js Unit tests and end-to-end zero-knowledge test
+```
 
 ## API
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /api/prelogin?email=` | – | KDF iteration count |
-| `POST /api/register` | – | `{email, authKey, iterations, vault:{iv,ct}}` |
-| `POST /api/login` | – | `{email, authKey}` → `{token, vault}` |
-| `GET/PUT /api/vault` | Bearer | Fetch / save encrypted blob (`baseVersion` required on PUT) |
-| `GET /api/audit`, `POST /api/audit` | Bearer | Read log; report `breach_check` event |
-| `POST /api/logout` | Bearer | `{reason: 'manual' \| 'auto'}` |
+| `GET /api/prelogin?email=` | – | Key-derivation iteration count |
+| `POST /api/register` | – | `{ email, authKey, iterations, vault: { iv, ct } }` |
+| `POST /api/login` | – | `{ email, authKey }` → `{ token, vault }` |
+| `GET` / `PUT /api/vault` | Bearer | Fetch or save the encrypted blob (`baseVersion` required on PUT) |
+| `GET` / `POST /api/audit` | Bearer | Read the audit log, or report a `breach_check` event |
+| `POST /api/logout` | Bearer | `{ reason: "manual" \| "auto" }` |
+
+## Known limitations
+
+This is a learning and portfolio project that hasn't had a professional security audit.
+
+- **No master-password recovery or change.** Forgetting the password makes the vault unrecoverable, by design.
+- The web app's JavaScript is delivered by the server, so a compromised server could ship malicious code. A signed browser extension or native client would reduce this risk.
+- JavaScript can't reliably erase memory. Locking drops references, but the garbage collector decides when the bytes disappear.
+- The "account already exists" response on registration reveals which emails are registered.
+- The bundled weak-password list is small. The breach check is the stronger signal.
+- Storage is a single JSON file on a single process, which is fine for personal use. A production deployment should use a real database and HTTPS.
+
+## Roadmap
+
+- Master-password change with automatic re-encryption
+- Import and export (encrypted)
+- Two-factor authentication
+- Database storage (SQLite or PostgreSQL)
+- Browser extension for autofill
+
+## License
+
+MIT
