@@ -1,0 +1,15 @@
+{
+  "name": "vaultguard",
+  "version": "1.0.0",
+  "description": "Zero-knowledge encrypted password manager",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
